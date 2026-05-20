@@ -1,0 +1,18 @@
+{
+  "title": "Jamie's Daily Math",
+  "pages": [
+    {
+      "sections": [
+        { "type": "oral",   "max": 20,  "count": 30 },
+        { "type": "column", "max": 100, "count": 6, "carry": true }
+      ]
+    },
+    {
+      "sections": [
+        { "type": "missing", "max": 20, "count": 18 },
+        { "type": "oral",    "max": 20, "count": 20, "op": "sub",
+          "label": "Subtraction Drill (within 20)" }
+      ]
+    }
+  ]
+}

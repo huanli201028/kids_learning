@@ -1,0 +1,28 @@
+{
+  "title": "Math Sampler",
+  "pages": [
+    {
+      "sections": [
+        { "type": "oral",   "max": 10, "count": 16, "carry": false,
+          "label": "Warm-up (within 10, no carry)" },
+        { "type": "oral",   "max": 20, "count": 24,
+          "label": "Mental Math (within 20)" },
+        { "type": "column", "max": 100, "count": 8, "carry": true }
+      ]
+    },
+    {
+      "sections": [
+        { "type": "missing", "max": 20, "count": 12,
+          "label": "Find the Missing Number (within 20)" },
+        { "type": "missing", "max": 100, "count": 12, "op": "add", "carry": true,
+          "label": "Find the Missing Number (addition within 100)" }
+      ]
+    },
+    {
+      "sections": [
+        { "type": "column", "max": 100, "count": 16, "carry": true,
+          "label": "Column Addition / Subtraction (within 100, with carry/borrow)" }
+      ]
+    }
+  ]
+}
