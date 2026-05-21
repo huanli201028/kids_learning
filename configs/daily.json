@@ -3,15 +3,14 @@
   "pages": [
     {
       "sections": [
-        { "type": "oral",   "max": 20,  "count": 30 },
-        { "type": "column", "max": 100, "count": 6, "carry": true }
+        { "type": "oral",   "max": 20,  "count": 20, "regroup_pct": 70 },
+        { "type": "column", "max": 100, "count": 10, "regroup_pct": 70,"carry": true }
       ]
     },
     {
       "sections": [
-        { "type": "missing", "max": 20, "count": 18 },
-        { "type": "oral",    "max": 20, "count": 20, "op": "sub",
-          "label": "Subtraction Drill (within 20)" }
+        { "type": "missing", "max": 20, "count": 5, "regroup_pct": 70 },
+        { "type": "oral",    "max": 20, "count": 15, "regroup_pct": 70, "op": "sub", "label": "Subtraction Drill (within 20)" }
       ]
     }
   ]

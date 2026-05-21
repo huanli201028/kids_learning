@@ -34,15 +34,19 @@ B) Multi-section config (JSON file) — put many sections on one page,
    }
 
    Section keys:
-     type    : "oral" | "missing" | "column"
-     max     : upper bound for operands/results (default 20)
-     count   : number of problems in this section (defaults: oral=40, missing=24, column=16)
-     op      : "add" | "sub" | "both"  (default "both")
-     carry   : true | false            (default: max > 10)
-     label   : custom section heading   (default auto-generated)
-     weight  : float, controls vertical share of the page
-               (default = count; equal sections all share evenly)
-     cols    : override the grid column count
+     type         : "oral" | "missing" | "column"  (required)
+     min          : lower bound for operands         (default 0)
+     max          : upper bound for operands/results (default 20)
+     count        : number of problems in this section
+                    (defaults: oral=40, missing=24, column=16)
+     op           : "add" | "sub" | "both"           (default "both")
+     regroup_pct  : 0-100, target % of problems requiring regrouping
+                    (carry/borrow). Omit for a natural random mix.
+     carry        : (legacy) false → equivalent to regroup_pct=0
+     label        : custom section heading           (default auto-generated)
+     weight       : float, controls vertical share of the page
+                    (default = count)
+     cols         : override the grid column count
 """
 
 import argparse
@@ -67,43 +71,68 @@ MARGIN_BOT = 0.5 * inch
 
 # ---------- problem generators ----------
 
-def _pick_add(max_val, allow_carry):
-    for _ in range(200):
-        a = random.randint(0, max_val)
-        b = random.randint(0, max_val - a)
-        if not allow_carry:
-            if (a % 10) + (b % 10) >= 10:
-                continue
-            if max_val > 10 and (a // 10) + (b // 10) >= 10:
-                continue
-        return a, b
-    return 0, 0
+def _pick_add(min_val, max_val):
+    """(a, b) with min_val <= a, b and a + b <= max_val."""
+    a_high = max_val - min_val
+    if a_high < min_val:
+        return min_val, min_val
+    a = random.randint(min_val, a_high)
+    b = random.randint(min_val, max_val - a)
+    return a, b
 
 
-def _pick_sub(max_val, allow_borrow):
-    for _ in range(200):
-        a = random.randint(1, max_val)
-        b = random.randint(0, a)
-        if not allow_borrow and (a % 10) < (b % 10):
-            continue
-        return a, b
-    return 1, 0
+def _pick_sub(min_val, max_val):
+    """(a, b) with min_val <= b <= a <= max_val."""
+    lo = max(min_val, 1)
+    hi = max(lo, max_val)
+    a = random.randint(lo, hi)
+    b = random.randint(min_val, a)
+    return a, b
 
 
-def gen_oral(max_val, op, carry, n):
+def _is_trivial(op, a, b):
+    """Trivial problems we never want on the sheet.
+    Add: any operand is 0  (0+x, x+0).
+    Sub: result is 0 (a==b)  or subtracting 0 (a-0)."""
+    if op == '+':
+        return a == 0 or b == 0
+    return a == b or b == 0
+
+
+def _requires_regroup_add(a, b):
+    while a > 0 or b > 0:
+        if (a % 10) + (b % 10) >= 10:
+            return True
+        a //= 10
+        b //= 10
+    return False
+
+
+def _requires_regroup_sub(a, b):
+    """Assumes a >= b."""
+    while a > 0 or b > 0:
+        if (a % 10) < (b % 10):
+            return True
+        a //= 10
+        b //= 10
+    return False
+
+
+def _requires_regroup(op, a, b):
+    return _requires_regroup_add(a, b) if op == '+' else _requires_regroup_sub(a, b)
+
+
+def gen_oral(min_val, max_val, op, regroup_pct, n):
+    """regroup_pct: None = natural mix; 0..100 = target % of problems requiring regroup."""
     out, seen, attempts = [], set(), 0
-    while len(out) < n and attempts < n * 80:
+    while len(out) < n and attempts < n * 500:
         attempts += 1
         chosen = op if op != 'both' else random.choice(['+', '-'])
-        if chosen == '+':
-            a, b = _pick_add(max_val, carry)
-        else:
-            a, b = _pick_sub(max_val, carry)
-        if a == 0 and b == 0:
+        want = None if regroup_pct is None else (random.random() * 100 < regroup_pct)
+        a, b = _pick_add(min_val, max_val) if chosen == '+' else _pick_sub(min_val, max_val)
+        if _is_trivial(chosen, a, b):
             continue
-        if chosen == '-' and b == 0 and random.random() < 0.7:
-            continue
-        if chosen == '+' and (a == 0 or b == 0) and random.random() < 0.7:
+        if want is not None and _requires_regroup(chosen, a, b) != want:
             continue
         key = (chosen, a, b)
         if key in seen:
@@ -113,26 +142,24 @@ def gen_oral(max_val, op, carry, n):
     return out
 
 
-def gen_missing(max_val, op, carry, n):
+def gen_missing(min_val, max_val, op, regroup_pct, n):
     """Returns [(op, a, b, c, slot)]. slot 0 → ___+b=c, slot 1 → a+___=c."""
     out, seen, attempts = [], set(), 0
-    while len(out) < n and attempts < n * 100:
+    while len(out) < n and attempts < n * 500:
         attempts += 1
         chosen = op if op != 'both' else random.choice(['+', '-'])
+        want = None if regroup_pct is None else (random.random() * 100 < regroup_pct)
         if chosen == '+':
-            a, b = _pick_add(max_val, carry)
+            a, b = _pick_add(min_val, max_val)
             c = a + b
         else:
-            a, b = _pick_sub(max_val, carry)
+            a, b = _pick_sub(min_val, max_val)
             c = a - b
+        if _is_trivial(chosen, a, b):
+            continue
+        if want is not None and _requires_regroup(chosen, a, b) != want:
+            continue
         slot = random.choice([0, 1])
-        if slot == 0 and a == 0:
-            continue
-        if slot == 1 and b == 0:
-            continue
-        if c == 0 or c == a or c == b:
-            if random.random() < 0.7:
-                continue
         key = (chosen, a, b, slot)
         if key in seen:
             continue
@@ -141,8 +168,8 @@ def gen_missing(max_val, op, carry, n):
     return out
 
 
-def gen_column(max_val, op, carry, n):
-    return gen_oral(max_val, op, carry, n)
+def gen_column(min_val, max_val, op, regroup_pct, n):
+    return gen_oral(min_val, max_val, op, regroup_pct, n)
 
 
 GENERATORS = {
@@ -163,13 +190,24 @@ LABEL_TEMPLATE = {
 
 def _auto_label(sec):
     base = LABEL_TEMPLATE[sec['type']]
+    min_val = sec.get('min', 0)
     max_val = sec.get('max', 20)
     op = sec.get('op', 'both')
     op_str = {'add': 'addition', 'sub': 'subtraction', 'both': '+/-'}[op]
-    carry = sec.get('carry')
-    if carry is False:
-        return f"{base} ({op_str}, within {max_val}, no carry/borrow)"
-    return f"{base} ({op_str}, within {max_val})"
+    range_str = f"{min_val}-{max_val}" if min_val > 0 else f"within {max_val}"
+
+    regroup_pct = sec.get('regroup_pct')
+    if regroup_pct is None and sec.get('carry') is False:
+        regroup_pct = 0
+    if regroup_pct == 0:
+        regroup_str = ", no regroup"
+    elif regroup_pct == 100:
+        regroup_str = ", all regroup"
+    elif isinstance(regroup_pct, (int, float)):
+        regroup_str = f", {int(regroup_pct)}% regroup"
+    else:
+        regroup_str = ""
+    return f"{base} ({op_str}, {range_str}{regroup_str})"
 
 
 # ---------- PDF rendering ----------
@@ -307,12 +345,18 @@ def _resolve_section(sec):
     t = s['type']
     if t not in GENERATORS:
         raise ValueError(f"Unknown section type: {t}")
+    s.setdefault('min', 0)
     s.setdefault('max', 20)
     s.setdefault('op', 'both')
     s.setdefault('count', DEFAULT_COUNT[t])
     s.setdefault('cols', DEFAULT_COLS[t])
-    if s.get('carry') is None:
-        s['carry'] = s['max'] > 10
+
+    # Resolve regroup_pct, honoring legacy `carry: false` as 0%.
+    rp = s.get('regroup_pct')
+    if rp is None and s.get('carry') is False:
+        rp = 0
+    s['regroup_pct'] = rp  # may stay None = natural mix
+
     s.setdefault('weight', s['count'])
     if not s.get('label'):
         s['label'] = _auto_label(s)
@@ -339,7 +383,8 @@ def render_page(c, page_spec, page_num, total_pages, page_title):
         sec_h = avail_h * (w / total_w)
         t = sec['type']
         op = op_map[sec['op']]
-        problems = GENERATORS[t](sec['max'], op, sec['carry'], sec['count'])
+        problems = GENERATORS[t](sec['min'], sec['max'], op,
+                                 sec['regroup_pct'], sec['count'])
         RENDERERS[t](c, problems, x, y_cursor, width, sec_h,
                      label=sec['label'], cols=sec['cols'])
         y_cursor -= sec_h
@@ -374,9 +419,10 @@ def build_config_from_cli(args):
             t = args.type
         sec = {
             'type': t,
+            'min': args.min,
             'max': args.max,
             'op': args.op,
-            'carry': args.carry,
+            'regroup_pct': args.regroup_pct,
             'count': args.count or DEFAULT_COUNT[t],
         }
         pages.append({'sections': [sec]})
@@ -395,17 +441,35 @@ def main():
                    default=None, help='Single-section quick mode')
     p.add_argument('--count', type=int, default=None, help='Problems per section')
     p.add_argument('--pages', type=int, default=1, help='Number of pages')
-    p.add_argument('--max', type=int, default=20, help='Number upper bound (default 20)')
+    p.add_argument('--min', type=int, default=0,
+                   help='Number lower bound for operands (default 0)')
+    p.add_argument('--max', type=int, default=20,
+                   help='Number upper bound (default 20)')
     p.add_argument('--op', choices=['add', 'sub', 'both'], default='both')
-    p.add_argument('--carry', dest='carry', action='store_true',
-                   help='Allow carry/borrow')
-    p.add_argument('--no-carry', dest='carry', action='store_false',
-                   help='Disallow carry/borrow')
-    p.set_defaults(carry=None)
+
+    rp = p.add_mutually_exclusive_group()
+    rp.add_argument('--regroup-pct', dest='regroup_pct', type=int, default=None,
+                    metavar='N',
+                    help='Target percent (0-100) of problems requiring regroup '
+                         '(carry/borrow). Default: natural mix.')
+    rp.add_argument('--regroup', dest='regroup_pct', action='store_const',
+                    const=100, help='Every problem requires regrouping (=100%%)')
+    rp.add_argument('--no-regroup', dest='regroup_pct', action='store_const',
+                    const=0, help='No regrouping allowed (=0%%)')
+    rp.add_argument('--carry', dest='regroup_pct', action='store_const',
+                    const=None, help='(legacy) Allow regrouping — natural mix')
+    rp.add_argument('--no-carry', dest='regroup_pct', action='store_const',
+                    const=0, help='(legacy) Disallow regrouping — alias of --no-regroup')
+
     p.add_argument('--title', default=None, help='Page title')
     p.add_argument('--out', default=None, help='Output PDF path')
     p.add_argument('--seed', type=int, default=None, help='Random seed (reproducible)')
     args = p.parse_args()
+
+    if args.regroup_pct is not None and not (0 <= args.regroup_pct <= 100):
+        p.error('--regroup-pct must be between 0 and 100')
+    if args.min > args.max:
+        p.error('--min must be <= --max')
 
     if args.seed is not None:
         random.seed(args.seed)
@@ -418,8 +482,6 @@ def main():
     else:
         if not args.type:
             args.type = 'mixed'
-        if args.carry is None:
-            args.carry = args.max > 10
         cfg = build_config_from_cli(args)
         suffix = args.type
 
