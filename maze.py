@@ -324,6 +324,76 @@ ICON_DRAWERS = {
     'star':   _draw_star,
 }
 
+
+# ---------- Geometry-Dash style spikes ----------
+
+SPIKE_FILL   = (0.93, 0.22, 0.22)
+SPIKE_STROKE = (0.45, 0.05, 0.05)
+
+
+def _draw_spike_up(c, x_left, y_bot, cell):
+    """Triangle spike sitting on the floor (south wall), pointing up."""
+    sw = cell * 0.62
+    sh = cell * 0.55
+    bx = x_left + (cell - sw) / 2
+    by = y_bot + 0.6
+    c.setFillColorRGB(*SPIKE_FILL)
+    c.setStrokeColorRGB(*SPIKE_STROKE)
+    c.setLineWidth(0.6)
+    p = c.beginPath()
+    p.moveTo(bx,       by)
+    p.lineTo(bx + sw,  by)
+    p.lineTo(bx + sw / 2, by + sh)
+    p.close()
+    c.drawPath(p, stroke=1, fill=1)
+    _reset_colors(c)
+
+
+def _draw_spike_down(c, x_left, y_top, cell):
+    """Triangle spike hanging from the ceiling (north wall), pointing down."""
+    sw = cell * 0.62
+    sh = cell * 0.55
+    bx = x_left + (cell - sw) / 2
+    by = y_top - 0.6
+    c.setFillColorRGB(*SPIKE_FILL)
+    c.setStrokeColorRGB(*SPIKE_STROKE)
+    c.setLineWidth(0.6)
+    p = c.beginPath()
+    p.moveTo(bx,       by)
+    p.lineTo(bx + sw,  by)
+    p.lineTo(bx + sw / 2, by - sh)
+    p.close()
+    c.drawPath(p, stroke=1, fill=1)
+    _reset_colors(c)
+
+
+def place_spikes(width, height, rng, density):
+    """Return dict {(x, y): set_of_sides} where sides ⊆ {'N','S'}.
+    Spikes are decorative hazards — they sit inside cells but never block the path.
+    Imagine a Geometry-Dash player slipping under ceiling spikes / over floor spikes.
+    Only the start and goal cells are skipped so the mouse/cheese icons stay readable.
+    """
+    if density <= 0:
+        return {}
+    start = (0, height - 1)
+    end   = (width - 1, 0)
+    spikes = {}
+    for x in range(width):
+        for y in range(height):
+            if (x, y) == start or (x, y) == end:
+                continue
+            if rng.random() >= density:
+                continue
+            roll = rng.random()
+            if roll < 0.45:
+                sides = {'S'}            # spike on floor
+            elif roll < 0.85:
+                sides = {'N'}            # spike on ceiling
+            else:
+                sides = {'N', 'S'}       # both — slip between the tips
+            spikes[(x, y)] = sides
+    return spikes
+
 THEMES = {
     'mouse':  ('mouse',  'cheese'),
     'car':    ('car',    'flag'),
@@ -332,7 +402,7 @@ THEMES = {
 
 
 def draw_maze(c, walls, width, height, x0, y0_top, max_w, max_h,
-              label=None, solution=None, theme='mouse'):
+              label=None, solution=None, theme='mouse', spikes=None):
     """Draw maze inside the box anchored at top-left (x0, y0_top), size (max_w, max_h).
     Start at top-left cell (0, height-1), End at bottom-right cell (width-1, 0).
     """
@@ -381,6 +451,16 @@ def draw_maze(c, walls, width, height, x0, y0_top, max_w, max_h,
                 c.line(x_left, y_top, x_right, y_top)
             if cx == width - 1 and draw_e:
                 c.line(x_right, y_bot, x_right, y_top)
+
+    # spikes (drawn before the solution overlay so the red path sits on top)
+    if spikes:
+        for (cx, cy), sides in spikes.items():
+            x_left, y_bot = cell_xy(cx, cy)
+            y_top = y_bot + cell
+            if 'S' in sides:
+                _draw_spike_up(c, x_left, y_bot, cell)
+            if 'N' in sides:
+                _draw_spike_down(c, x_left, y_top, cell)
 
     # solution overlay
     if solution:
@@ -437,7 +517,7 @@ def slot_layout(per_page, top_y):
 
 def draw_mazes_pages(c, mazes, title, total_pages, per_page,
                      with_solution=False, page_offset=0):
-    """mazes is a list of (walls, path, W, H, theme). Draw them across pages."""
+    """mazes is a list of (walls, path, W, H, theme, spikes). Draw them across pages."""
     n = len(mazes)
     pages = (n + per_page - 1) // per_page
     for pi in range(pages):
@@ -447,11 +527,11 @@ def draw_mazes_pages(c, mazes, title, total_pages, per_page,
             mi = pi * per_page + si
             if mi >= n:
                 break
-            walls, path, W, H, theme = mazes[mi]
+            walls, path, W, H, theme, spikes = mazes[mi]
             label = f"#{mi + 1}   ({W} × {H})"
             sol = path if with_solution else None
             draw_maze(c, walls, W, H, sx + 4, sy - 4, sw - 8, sh - 6,
-                      label=label, solution=sol, theme=theme)
+                      label=label, solution=sol, theme=theme, spikes=spikes)
         c.showPage()
 
 
@@ -485,6 +565,12 @@ def main():
     p.add_argument('--theme', choices=list(THEMES) + ['random'], default='mouse',
                    help='Start/goal cartoon: mouse→cheese, car→flag, rocket→star, '
                         'or "random" to mix across mazes (default mouse)')
+    p.add_argument('--spikes', action='store_true',
+                   help='Sprinkle Geometry-Dash-style triangle spikes inside non-solution '
+                        'cells. The safe path is still solvable.')
+    p.add_argument('--spike-density', type=float, default=0.22,
+                   help='Fraction of off-path cells that get a spike (0.0–1.0, default 0.22). '
+                        'Only used with --spikes.')
     p.add_argument('--title', default='Maze', help='Page title (default "Maze")')
     p.add_argument('--out', default=None, help='Output PDF path')
     p.add_argument('--seed', type=int, default=None, help='Random seed (reproducible)')
@@ -509,7 +595,8 @@ def main():
         out_dir.mkdir(exist_ok=True)
         stamp = date.today().isoformat()
         diff_tag = f'{W}x{H}' if args.width and args.height else args.difficulty
-        out_path = out_dir / f'{stamp}_maze_{diff_tag}.pdf'
+        spike_tag = '_spikes' if args.spikes else ''
+        out_path = out_dir / f'{stamp}_maze_{diff_tag}{spike_tag}.pdf'
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -522,7 +609,11 @@ def main():
             theme = rng.choice(theme_names)
         else:
             theme = args.theme
-        mazes.append((walls, path, W, H, theme))
+        if args.spikes:
+            spikes = place_spikes(W, H, rng, args.spike_density)
+        else:
+            spikes = None
+        mazes.append((walls, path, W, H, theme, spikes))
 
     n_q_pages = (args.count + args.per_page - 1) // args.per_page
     total_pages = n_q_pages + (n_q_pages if args.solution else 0)
@@ -537,8 +628,11 @@ def main():
     c.save()
 
     print(f"Generated: {out_path}")
+    extra = ""
+    if args.spikes:
+        extra = f"  spikes=on(density={args.spike_density})"
     print(f"  count={args.count}  size={W}x{H}  per_page={args.per_page}"
-          f"  solution={args.solution}")
+          f"  solution={args.solution}{extra}")
 
 
 if __name__ == '__main__':
